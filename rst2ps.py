@@ -38,7 +38,14 @@ def ps_from_obj_curve(fw, obj, matrix):
 
     def spline_segments_bezier(spline):
         points = spline.bezier_points[:]
-        p_prev = points[-1]
+
+        if spline.use_cyclic_u:
+            p_prev = points[-1]
+        else:
+            points.append(points.pop(0))
+            p_prev = points[-1]
+            points.pop()
+
         for p in points:
             yield (
                 matrix * p_prev.co,
@@ -47,33 +54,54 @@ def ps_from_obj_curve(fw, obj, matrix):
                 matrix * p.co)
             p_prev = p
 
-    cu = obj.data
 
-    for material_index, material in enumerate(cu.materials if cu.materials else (None,)):
-        for spline in cu.splines:
-            if spline.material_index == material_index:
-                if spline.type == 'POLY':
-                    for i, p in enumerate(spline.points):
-                        p = matrix * p.co.xyz
-                        fw("%.6f %.6f %s\n" % (p[0], p[1], "moveto" if i == 0 else "lineto"))
-
-                elif spline.type == 'BEZIER':
-                    i = 0
-                    for pa, pah, pbh, pb in spline_segments_bezier(spline):
-                        if i == 0:
-                            fw("%.6f %.6f moveto\n" % pa[:2])
-                        fw("%.6f %.6f %.6f %.6f %.6f %.6f curveto\n" % (pah[:2] + pbh[:2] + pb[:2]))
-                        i += 1
-
-                    fw("closepath\n")
-
+    def ps_from_material(material):
         if material is not None:
             rgb = material.diffuse_color[:]
         else:
             rgb = 0.0, 0.0, 0.0
         fw("%.4f %.4f %.4f setrgbcolor\n" % rgb)
 
-        fw("fill\n")
+
+    fw("newpath\n")
+
+    cu = obj.data
+    is_fill_ok = (cu.fill_mode != 'NONE') and (cu.dimensions != '3D')
+
+    if not is_fill_ok:
+        fw("%.6f setlinewidth\n" % ((2.0 * cu.bevel_depth) * matrix.median_scale))
+
+    for is_fill in ((False, True) if is_fill_ok else (False,)):
+        for material_index, material in enumerate(cu.materials if cu.materials else (None,)):
+            for spline in cu.splines:
+                if spline.material_index == material_index:
+
+                    if is_fill_ok and (spline.use_cyclic_u != is_fill):
+                        continue
+
+                    if spline.type == 'POLY':
+                        for i, p in enumerate(spline.points):
+                            p = matrix * p.co.xyz
+                            fw("%.6f %.6f %s\n" % (p[0], p[1], "moveto" if i == 0 else "lineto"))
+                        if spline.use_cyclic_u:
+                            fw("closepath\n")
+
+                    elif spline.type == 'BEZIER':
+                        i = 0
+                        for pa, pah, pbh, pb in spline_segments_bezier(spline):
+                            if i == 0:
+                                fw("%.6f %.6f moveto\n" % pa[:2])
+                            fw("%.6f %.6f %.6f %.6f %.6f %.6f curveto\n" % (pah[:2] + pbh[:2] + pb[:2]))
+                            i += 1
+                        if spline.use_cyclic_u:
+                            fw("closepath\n")
+
+            ps_from_material(material)
+
+            if is_fill:
+                fw("fill\n")
+            else:
+                fw("stroke\n")
 
 
 def ps_from_obj_image(fw, obj, matrix, use_placeholder=False):
