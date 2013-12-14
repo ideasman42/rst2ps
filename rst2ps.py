@@ -190,10 +190,6 @@ def ps_write(fw):
 
     global_matrix, bounds = ps_header_viewbounds(scene)
     global_scale = 1.0
-    bpy.ops.object.select_all(action='SELECT')
-    # XXX, misses duplis!
-    bpy.ops.object.convert(target='CURVE')
-
 
     fw("%!PS\n")
     fw("%%Creator: rst2ps.py\n")
@@ -213,7 +209,7 @@ def ps_write(fw):
     objects.sort(key=lambda item: (item[1][2][3], item[0].name))
 
     for obj, matrix in objects:
-        if obj.type == 'CURVE':
+        if obj.type in {'CURVE', 'FONT'}:
             ps_from_obj_curve(fw, obj, matrix)
         elif obj.type == 'EMPTY':
             ps_from_obj_image(fw, obj, matrix)
