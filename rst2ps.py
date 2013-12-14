@@ -1,3 +1,21 @@
+# ##### BEGIN GPL LICENSE BLOCK #####
+#
+#  This program is free software; you can redistribute it and/or
+#  modify it under the terms of the GNU General Public License
+#  as published by the Free Software Foundation; either version 2
+#  of the License, or (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License
+#  along with this program; if not, write to the Free Software Foundation,
+#  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+#
+# ##### END GPL LICENSE BLOCK #####
+
 
 # -----
 # blender -P rst2ps.py
@@ -17,7 +35,8 @@ def ps_from_poly(fw, points, color=(0.0, 0.0, 0.0)):
 
 
 def ps_from_obj_curve(fw, obj, matrix):
-    def spline_segments(spline):
+
+    def spline_segments_bezier(spline):
         points = spline.bezier_points[:]
         p_prev = points[-1]
         for p in points:
@@ -32,17 +51,21 @@ def ps_from_obj_curve(fw, obj, matrix):
 
     for material_index, material in enumerate(cu.materials if cu.materials else (None,)):
         for spline in cu.splines:
-            if not spline.bezier_points:
-                continue  # TODO
             if spline.material_index == material_index:
-                i = 0
-                for pa, pah, pbh, pb in spline_segments(spline):
-                    if i == 0:
-                        fw("%.6f %.6f moveto\n" % pa[:2])
-                    fw("%.6f %.6f %.6f %.6f %.6f %.6f curveto\n" % (pah[:2] + pbh[:2] + pb[:2]))
-                    i += 1
+                if spline.type == 'POLY':
+                    for i, p in enumerate(spline.points):
+                        p = matrix * p.co.xyz
+                        fw("%.6f %.6f %s\n" % (p[0], p[1], "moveto" if i == 0 else "lineto"))
 
-                fw("closepath\n")
+                elif spline.type == 'BEZIER':
+                    i = 0
+                    for pa, pah, pbh, pb in spline_segments_bezier(spline):
+                        if i == 0:
+                            fw("%.6f %.6f moveto\n" % pa[:2])
+                        fw("%.6f %.6f %.6f %.6f %.6f %.6f curveto\n" % (pah[:2] + pbh[:2] + pb[:2]))
+                        i += 1
+
+                    fw("closepath\n")
 
         if material is not None:
             rgb = material.diffuse_color[:]
@@ -67,6 +90,7 @@ def ps_from_obj_image(fw, obj, matrix, use_placeholder=False):
     is_missing = False
 
     filepath = bpy.path.abspath(image.filepath, library=image.library)
+    filepath = os.path.normpath(filepath)
 
     if not os.path.exists(filepath):
         print("  image path missing: %r -> %r" % (obj.name, filepath))
@@ -189,18 +213,17 @@ def ps_write(fw):
     scene = bpy.context.scene
 
     global_matrix, bounds = ps_header_viewbounds(scene)
-    global_scale = 1.0
 
     fw("%!PS\n")
+    fw("%%BoundingBox: " + ("0 0 %.6f %.6f\n" % (bounds[0], bounds[1])))
+    #fw("%%HiResBoundingBox: " + ("%.6f %.6f %.6f %.6f\n" % (bounds[0] / -2, bounds[1] / -2, bounds[0] / 2, bounds[1] / 2)))
     fw("%%Creator: rst2ps.py\n")
     fw("%%CreationDate: " + ("%s\n" % ps_header_datestring()))
     fw("%%Title: " + ("%s\n" % os.path.basename(bpy.data.filepath)))
-    fw("%%BoundingBox: " + ("%.6f %.6f %.6f %.6f\n" %
-            (bounds[0] / -2, bounds[1] / -2, bounds[0] / 2, bounds[1] / 2)))
     # fw("%%DocumentMedia: a4 0 0 1000 700 () ()\n")
-    fw("%%Pages: 1\n")
+    #fw("%%Pages: 1\n")
     fw("%%EndComments\n")
-    fw("0 0 translate\n")
+    fw("%.6f %.6f translate\n" % (bounds[0] / 2.0, bounds[1] / 2.0))
 
     import mathutils
 
@@ -227,3 +250,4 @@ f.close()
 # gv  -nosafer /test.ps
 #
 # b -b /src/rst2ps/tests/camera.blend --python /src/rst2ps/rst2ps.py ; gv -nosafer /test.ps
+# gs -dAutoRotatePages=/None -dAutoFilterColorImages=false -dColorImageFilter=/FlateEncode -dUseFlateCompression=true      -dBATCH -DNOPAUSE -q -sDEVICE=pdfwrite -g8112x596 -dPDFFitPage -sOutputFile=/out.pdf -f /test.ps
