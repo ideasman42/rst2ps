@@ -18,7 +18,8 @@
 #
 # Copyright Campbell Barton
 
-# -----
+# ----------------------------------------------------------------------------
+# Postscript writing functions
 
 
 def ps_from_poly(fw, points, color=(0.0, 0.0, 0.0)):
@@ -50,14 +51,12 @@ def ps_from_obj_curve(fw, obj, matrix):
                 matrix * p.co)
             p_prev = p
 
-
     def ps_from_material(material):
         if material is not None:
             rgb = material.diffuse_color[:]
         else:
             rgb = 0.0, 0.0, 0.0
         fw("%.4f %.4f %.4f setrgbcolor\n" % rgb)
-
 
     fw("newpath\n")
 
@@ -128,7 +127,6 @@ def ps_from_obj_image(fw, obj, matrix, no_image=False):
         aspx, aspy = x / y, 1.0
     else:
         aspx, aspy = 1.0, y / x
-
 
     from math import degrees
     from mathutils import Vector
@@ -226,9 +224,12 @@ def ps_scene_objects(scene, global_matrix):
     if scene_set is not None:
         yield from ps_scene_objects(scene_set, global_matrix)
 
+# ----------------------------------------------------------------------------
+# Write Functions (exposed externally)
+
 
 def ps_write(fw,
-        no_image=False):
+             no_image=False):
 
     # first calculate the view matrix and boundbox using an ortho camera.
 
@@ -275,6 +276,9 @@ def write(filepath,
                  no_image=no_image)
 
 
+# ----------------------------------------------------------------------------
+# Command line access
+
 def main():
     import sys
     import argparse
@@ -288,17 +292,17 @@ def main():
 
     # When --help or no args are given, print this help
     usage_text = (
-    "Write out a postscript (.ps / .pdf) document for this blend file:"
-    "  blender --background --python " + __file__ + " -- [options]\n"
-    )
+        "Write out a postscript (.ps / .pdf) document for this blend file:"
+        "  blender --background --python " + __file__ + " -- [options]\n"
+        )
 
     parser = argparse.ArgumentParser(description=usage_text)
 
     parser.add_argument("-o", "--output", dest="output_path", metavar='FILE',
-            help="Save the generated file to the specified path")
+                        help="Save the generated file to the specified path")
 
-    parser.add_argument('-n', '--no_image', dest="no_image", default=False,
-            action="store_true", help="Use placeholders for images")
+    parser.add_argument('-n', '--no_image', dest="no_image", default=False, action="store_true",
+                        help="Use placeholders for images")
 
     args = parser.parse_args(argv)  # In this example we wont use the args
 
@@ -312,18 +316,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-#f = open("/tmp/test.ps", "w")
-#ps_write(f.write)
-#f.close()
-
-# import os
-# -dNOSAFER for images
-# os.system("ps2pdf -dNOSAFER -dEPSCrop -dAutoRotatePages=/None -dAutoFilterColorImages=false -dColorImageFilter=/FlateEncode -dUseFlateCompression=true /test.ps /test.pdf")
-# gv  -nosafer /test.ps
-#
-# b -b /src/rst2ps/tests/camera.blend --python /src/rst2ps/blend2ps.py -- --output="/testt.ps" ; gv -nosafer /testt.ps
-# gs -dAutoRotatePages=/None -dAutoFilterColorImages=false -dColorImageFilter=/FlateEncode -dUseFlateCompression=true      -dBATCH -DNOPAUSE -q -sDEVICE=pdfwrite -g8112x596 -dPDFFitPage -sOutputFile=/out.pdf -f /test.ps
-# ps2pdf -dEPSCrop -dAutoRotatePages=/None -dAutoFilterColorImages=false -dColorImageFilter=/FlateEncode -dUseFlateCompression=true /test.ps
-
