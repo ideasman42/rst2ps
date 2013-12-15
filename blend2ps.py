@@ -15,15 +15,11 @@
 #  Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 #
 # ##### END GPL LICENSE BLOCK #####
-
+#
+# Copyright Campbell Barton
 
 # -----
-# blender -P rst2ps.py
-# ps2pdf -dEPSCrop -dAutoRotatePages=/None -dAutoFilterColorImages=false -dColorImageFilter=/FlateEncode -dUseFlateCompression=true /test.ps
-# /src/rst2ps/tests/camera.blend
-#
-#
-# b -b /src/rst2ps/tests/camera.blend --python /src/rst2ps/rst2ps.py
+
 
 def ps_from_poly(fw, points, color=(0.0, 0.0, 0.0)):
     fw("newpath\n")
@@ -104,7 +100,7 @@ def ps_from_obj_curve(fw, obj, matrix):
                 fw("stroke\n")
 
 
-def ps_from_obj_image(fw, obj, matrix, use_placeholder=False):
+def ps_from_obj_image(fw, obj, matrix, no_image=False):
     # Seems this is ghostscript specific
     # requires '-dNOSAFER' arg.
     import bpy
@@ -152,7 +148,7 @@ def ps_from_obj_image(fw, obj, matrix, use_placeholder=False):
 
     points = [matrix * p for p in points]
 
-    if use_placeholder:
+    if no_image:
         ps_from_poly(fw, points, color=(0.0, 0.0, 0.0))
     elif is_missing:
         ps_from_poly(fw, points, color=(1.0, 0.0, 1.0))
@@ -231,7 +227,8 @@ def ps_scene_objects(scene, global_matrix):
         yield from ps_scene_objects(scene_set, global_matrix)
 
 
-def ps_write(fw):
+def ps_write(fw,
+        no_image=False):
 
     # first calculate the view matrix and boundbox using an ortho camera.
 
@@ -243,17 +240,18 @@ def ps_write(fw):
     global_matrix, bounds = ps_header_viewbounds(scene)
 
     fw("%!PS\n")
-    fw("%%BoundingBox: " + ("0 0 %.6f %.6f\n" % (bounds[0], bounds[1])))
-    #fw("%%HiResBoundingBox: " + ("%.6f %.6f %.6f %.6f\n" % (bounds[0] / -2, bounds[1] / -2, bounds[0] / 2, bounds[1] / 2)))
     fw("%%Creator: rst2ps.py\n")
     fw("%%CreationDate: " + ("%s\n" % ps_header_datestring()))
     fw("%%Title: " + ("%s\n" % os.path.basename(bpy.data.filepath)))
+    fw("%%BoundingBox: " + ("0 0 %.6f %.6f\n" % (bounds[0], bounds[1])))
     # fw("%%DocumentMedia: a4 0 0 1000 700 () ()\n")
     #fw("%%Pages: 1\n")
     fw("%%EndComments\n")
-    fw("%.6f %.6f translate\n" % (bounds[0] / 2.0, bounds[1] / 2.0))
 
-    import mathutils
+    # Blender camera coords use (x0, y0) is the middle of the page.
+    # for the postscript file, use (x0, y0) as bottom left
+    # makes choosing page size easier in ghostview.
+    fw("%.6f %.6f translate\n" % (bounds[0] / 2.0, bounds[1] / 2.0))
 
     objects = list(ps_scene_objects(scene, global_matrix))
     # sort by depth then object name
@@ -263,19 +261,69 @@ def ps_write(fw):
         if obj.type in {'CURVE', 'FONT'}:
             ps_from_obj_curve(fw, obj, matrix)
         elif obj.type == 'EMPTY':
-            ps_from_obj_image(fw, obj, matrix)
+            ps_from_obj_image(fw, obj, matrix,
+                              no_image=no_image)
 
     fw("showpage\n")
 
 
-f = open("/test.ps", "w")
-ps_write(f.write)
-f.close()
+def write(filepath,
+          no_image=False,
+          ):
+    with open(filepath, 'w') as file:
+        ps_write(file.write,
+                 no_image=no_image)
+
+
+def main():
+    import sys
+    import argparse
+
+    # Runs inside blender, use args after '--'
+    argv = sys.argv
+    if "--" not in argv:
+        argv = []  # as if no args are passed
+    else:
+        argv = argv[argv.index("--") + 1:]  # get all args after "--"
+
+    # When --help or no args are given, print this help
+    usage_text = (
+    "Write out a postscript (.ps / .pdf) document for this blend file:"
+    "  blender --background --python " + __file__ + " -- [options]\n"
+    )
+
+    parser = argparse.ArgumentParser(description=usage_text)
+
+    parser.add_argument("-o", "--output", dest="output_path", metavar='FILE',
+            help="Save the generated file to the specified path")
+
+    parser.add_argument('-n', '--no_image', dest="no_image", default=False,
+            action="store_true", help="Use placeholders for images")
+
+    args = parser.parse_args(argv)  # In this example we wont use the args
+
+    if not argv:
+        parser.print_help()
+        return
+
+    write(args.output_path,
+          no_image=args.no_image,
+          )
+
+if __name__ == "__main__":
+    main()
+
+
+#f = open("/tmp/test.ps", "w")
+#ps_write(f.write)
+#f.close()
 
 # import os
 # -dNOSAFER for images
 # os.system("ps2pdf -dNOSAFER -dEPSCrop -dAutoRotatePages=/None -dAutoFilterColorImages=false -dColorImageFilter=/FlateEncode -dUseFlateCompression=true /test.ps /test.pdf")
 # gv  -nosafer /test.ps
 #
-# b -b /src/rst2ps/tests/camera.blend --python /src/rst2ps/rst2ps.py ; gv -nosafer /test.ps
+# b -b /src/rst2ps/tests/camera.blend --python /src/rst2ps/blend2ps.py -- --output="/testt.ps" ; gv -nosafer /testt.ps
 # gs -dAutoRotatePages=/None -dAutoFilterColorImages=false -dColorImageFilter=/FlateEncode -dUseFlateCompression=true      -dBATCH -DNOPAUSE -q -sDEVICE=pdfwrite -g8112x596 -dPDFFitPage -sOutputFile=/out.pdf -f /test.ps
+# ps2pdf -dEPSCrop -dAutoRotatePages=/None -dAutoFilterColorImages=false -dColorImageFilter=/FlateEncode -dUseFlateCompression=true /test.ps
+
