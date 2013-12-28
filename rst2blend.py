@@ -14,7 +14,7 @@ def rst2tree(txt):
     parser.parse(txt, document)
     return document
 
-if 1:
+if 0:
     doc = rst2tree(open("/src/the_joy_of_life_drawing/book.rst", 'r', encoding="utf-8").read())
 elif 0:
     doc = rst2tree(open("/src/pyfbx_i42/fbx_spec.rst", 'r').read())
@@ -25,6 +25,34 @@ This is a title
 ===============
 
 Hello this is some text para 1.
+
+- Point one.
+
+- Point two.
+
+- Foo fa fa.
+
+  Some sub text.
+
+  - Some sub list.
+
+  - Some subsub.
+
+
+Lets try enum list.
+
+#. Hello.
+
+#. Another.
+
+
+Character list.
+
+A) List item.
+
+A) another.
+
+A) and another.
 
 Subtitle
 --------
@@ -88,12 +116,14 @@ def butil_text_calc_advance(scene, txt_ob):
 
     return advance
 
-def butil_text_to_blend(conf, style, body, body_fmt, align):
+def butil_text_to_blend(conf, indent, style, body, body_fmt, align):
 
     txt_ob, txt_cu = butil_text_add_default(conf.scene, style)
 
+    indent_dist = style.size * indent * 1.6
     box = txt_cu.text_boxes[0]
-    box.width = conf.page_width
+    box.x = indent_dist
+    box.width = conf.page_width - indent_dist
 
     butil_text_set_body(txt_cu, body, body_fmt)
 
@@ -127,6 +157,7 @@ class BDocConf:
         "scene",  # bpy.scene
 
         "page_width",
+        "paragraph_space",
         # TODO, fonts
 
         # style
@@ -146,15 +177,29 @@ class BElemABC:
     def to_blend(self, conf, y_pen):
         raise Exception("%r must implement to_blend")
 
+
+class BElemLineSpace(BElemABC):
+    __slots__ = BElemABC.__slots__
+
+    def __init__(self, style_id, fac_y):
+        self.data_src = style_id, fac_y
+
+    def to_blend(self, conf, pen_y):
+        style_id, fac_y = self.data_src
+        style = getattr(conf, style_id)
+
+        return pen_y - (style.size * fac_y)
+
+
 class BElemText(BElemABC):
     __slots__ = BElemABC.__slots__
 
-    def __init__(self, body, body_fmt, align, style_id):
-        self.data_src = body, body_fmt, align, style_id
+    def __init__(self, body, body_fmt, align, indent, style_id):
+        self.data_src = body, body_fmt, align, indent, style_id
 
     def to_blend(self, conf, pen_y):
-        body, body_fmt, align, style_id = self.data_src
-        txt_ob = butil_text_to_blend(conf, getattr(conf, style_id),
+        body, body_fmt, align, indent, style_id = self.data_src
+        txt_ob = butil_text_to_blend(conf, indent, getattr(conf, style_id),
                                      body, body_fmt, align)
 
         txt_ob.location.y = pen_y
@@ -163,6 +208,44 @@ class BElemText(BElemABC):
         return butil_text_calc_advance(conf.scene, txt_ob)
 
 
+class BElemListItem(BElemABC):
+    __slots__ = BElemABC.__slots__
+
+    def __init__(self, align, indent, style_id, list_type, list_count):
+        self.data_src = align, indent, style_id, list_type, list_count
+
+    def to_blend(self, conf, pen_y):
+        from docutils.utils import roman
+
+        align, indent, style_id, list_type, list_count = self.data_src
+        print(list_type)
+        if list_type is None:
+            body = " \u2022"
+        elif list_type == 'arabic':
+            body = " %d. " % (list_count + 1)
+        elif list_type == 'loweralpha':
+            body = " %s) " % (chr(ord('a') + list_count))
+        elif list_type == 'upperalpha':
+            body = " %s) " % (chr(ord('A') + list_count))
+        elif list_type == 'lowerroman':
+            body = "(%s) " % roman.toRoman(list_count + 1).lower()
+        elif list_type == 'upperroman':
+            body = "(%s) " % roman.toRoman(list_count + 1)
+        else:
+            raise Exception("unknown enum: %s" % list_type)
+
+        body_fmt = bytearray([0]) * len(body)
+
+        txt_ob = butil_text_to_blend(conf, indent, getattr(conf, style_id),
+                                     body, body_fmt, align)
+
+        txt_ob.location.y = pen_y
+        self.data_dst = txt_ob
+
+        butil_text_calc_advance(conf.scene, txt_ob)
+
+        # dont advance
+        return pen_y
 
 
 class BlendDoc:
@@ -199,6 +282,11 @@ class Visitor(docutils.nodes.NodeVisitor):
         self.bdoc = bdoc
 
         self.section_level = 0
+        self.indent = 0
+
+        self.list_types = []
+        self.list_count = []  # for numbered lists
+
         self.body = []
         self.body_fmt = []
 
@@ -258,11 +346,39 @@ class Visitor(docutils.nodes.NodeVisitor):
 
         body, body_fmt = self.pop_body()
         align = self.node_align(node)
-        elem = BElemText(body, body_fmt, align, "style_head%d" % self.section_level)
+        elem = BElemText(body, body_fmt, align, self.indent, "style_head%d" % self.section_level)
         self.bdoc.add_elem(elem)
 
         # import IPython
         # IPython.embed()
+
+    def visit_list_item(self, node):
+        align = self.node_align(node)
+        elem = BElemListItem(align, self.indent, "style_body",
+                             self.list_types[-1], self.list_count[-1])
+        self.bdoc.add_elem(elem) 
+
+        self.indent += 1
+    def depart_list_item(self, node):
+        self.list_count[-1] += 1
+
+        self.indent -= 1
+
+    def visit_bullet_list(self, node):
+        self.list_types.append(None)
+        self.list_count.append(0)
+    def depart_bullet_list(self, node):
+        item = self.list_types.pop()
+        assert(item == None)
+        del self.list_count[-1]
+
+    def visit_enumerated_list(self, node):
+        self.list_types.append(node["enumtype"])
+        self.list_count.append(0)
+    def depart_enumerated_list(self, node):
+        item = self.list_types.pop()
+        assert(item == node["enumtype"])
+        del self.list_count[-1]
 
     def visit_paragraph(self, node):
         # TODO
@@ -271,13 +387,26 @@ class Visitor(docutils.nodes.NodeVisitor):
     def depart_paragraph(self, node):
         body, body_fmt = self.pop_body()
         align = self.node_align(node)
-        elem = BElemText(body, body_fmt, align, "style_body")
+        elem = BElemText(body, body_fmt, align, self.indent, "style_body")
         self.bdoc.add_elem(elem)
 
+        elem = BElemLineSpace("style_body", 1.0)
+        self.bdoc.add_elem(elem)
 
     def visit_Text(self, node):
         text = node.astext()
+
+        text_ws_sta = text[0].isspace()
+        text_ws_end = text[-1].isspace()
+
         text = " ".join(text.split())
+
+        # add back whitespace on ends
+        if text_ws_sta:
+            text " " + text
+        if text_ws_end:
+            text = text + " "
+
         self.body.append(text)
         text_fmt = self.as_flag_n(len(text))
         self.body_fmt.append(text_fmt)
@@ -317,6 +446,18 @@ class Visitor(docutils.nodes.NodeVisitor):
     #    print("TEXT:", node.astext())
     #    # metadata['searchable_text'] = node.astext()
 
+    def visit_comment(self, node):
+        raise docutils.nodes.SkipNode
+    def depart_comment(self, node):
+        pass
+
+    def visit_raw(self, node):
+        raise docutils.nodes.SkipNode
+    def depart_raw(self, node):
+        pass
+
+
+
     def unknown_visit(self, node):
         pass
     def unknown_departure(self, node):
@@ -334,6 +475,7 @@ def blend_from_rst(stream):
     conf = BDocConf()
     conf.scene = bpy.context.scene
     conf.page_width = 6.0
+    conf.paragraph_space = 1.0
 
     # TODO, make args
     font = bpy.data.fonts.load("/usr/share/fonts/TTF/Vera.ttf")
